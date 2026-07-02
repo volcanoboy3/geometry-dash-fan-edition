@@ -15,6 +15,7 @@ const Save = {
       downloaded: [],
       myLevels: [],
       published: [],      // full level objects published from the editor
+      imported: [],       // community levels imported from a share code/file
       shopBought: [],
       icons: {
         selected: { cube: 0, ship: 0, ball: 0, ufo: 0, wave: 0, robot: 0, spider: 0 },
@@ -42,6 +43,7 @@ const Save = {
     this.data.icons = Object.assign(d.icons, this.data.icons || {});
     this.data.settings = Object.assign(d.settings, this.data.settings || {});
     this.data.secrets = this.data.secrets || {};
+    this.data.imported = this.data.imported || [];
   },
 
   write() {
@@ -168,6 +170,44 @@ const Save = {
   },
   unpublishLevel(id) {
     this.data.published = this.data.published.filter(l => l.id !== id);
+    this.write();
+  },
+
+  // ---------- community levels ----------
+  // build a fully playable level object from a lightweight editor/imported doc
+  docToLevel(doc) {
+    const objs = (doc.objects || []).map(o => Object.assign({}, o));
+    const maxX = objs.reduce((m, o) => Math.max(m, o.x), 10);
+    const diff = doc.difficulty || 'normal';
+    return {
+      id: doc.id,
+      name: doc.name,
+      author: doc.author || 'Anonymous',
+      difficulty: diff,
+      stars: diffById(diff).stars,
+      length: maxX + 8,
+      mode0: 'cube', speed0: 1, ceilH: 14,
+      objects: objs,
+      song: doc.song || makeSong(doc.id || 'community', 'house', 132, (doc.name || 'Level') + ' Theme', doc.author || 'Anon'),
+      coinsTotal: objs.filter(o => o.t === 'coin').length,
+      community: true,
+    };
+  },
+
+  // import a decoded doc into the community list; returns the stored entry
+  importLevel(decoded) {
+    const id = 'imp-' + Date.now() + '-' + Math.floor(Math.random() * 1e4);
+    const entry = {
+      id, name: decoded.name, author: decoded.author,
+      difficulty: decoded.difficulty, objects: decoded.objects,
+      importedAt: Date.now(),
+    };
+    this.data.imported.unshift(entry);
+    this.write();
+    return entry;
+  },
+  deleteImported(id) {
+    this.data.imported = this.data.imported.filter(l => l.id !== id);
     this.write();
   },
 

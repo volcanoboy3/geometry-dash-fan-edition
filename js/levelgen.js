@@ -686,11 +686,44 @@ function getGauntletLevel(gid, i) {
   return level;
 }
 
+// ================= COMMUNITY SHOWCASE =================
+// Original featured community levels — playable immediately, no download needed.
+const COMMUNITY_DB = [
+  { id: 'com-1', name: 'Rainbow Road',   author: 'PixelPro',   difficulty: 'normal', mood: 'upbeat',  bpm: 132, sec: 40, featured: true, likes: 128400 },
+  { id: 'com-2', name: 'Bounce House',   author: 'MiniMight',  difficulty: 'easy',   mood: 'chill',   bpm: 120, sec: 32, featured: true, likes: 88200 },
+  { id: 'com-3', name: 'Circuit Breaker', author: 'GlitchCat', difficulty: 'hard',   mood: 'funky',   bpm: 140, sec: 44, featured: true, likes: 204100 },
+  { id: 'com-4', name: 'Wavelength',     author: 'WaveKing',   difficulty: 'harder', mood: 'intense', bpm: 148, sec: 46, epic: true,     likes: 312500 },
+  { id: 'com-5', name: 'Spider Silk',    author: 'OrbitFox',   difficulty: 'insane', mood: 'dark',    bpm: 152, sec: 48, epic: true,     likes: 421900 },
+  { id: 'com-6', name: 'First Steps',    author: 'SkyBlaze',   difficulty: 'easy',   mood: 'house',   bpm: 124, sec: 30, featured: true, likes: 45600 },
+];
+
+function getCommunityLevel(id) {
+  if (_levelCache[id]) return _levelCache[id];
+  const meta = COMMUNITY_DB.find(l => l.id === id);
+  if (!meta) return null;
+  const d = DIFF_GEN[meta.difficulty];
+  const rng = makeRNG(hashSeed(id));
+  const pool = d >= 7 ? ['ship', 'ball', 'ufo', 'wave', 'spider'] : d >= 4 ? ['ship', 'ball', 'ufo', 'robot'] : ['ship', 'ball'];
+  const modes = [{ mode: 'cube', frac: 2 }, { mode: pool[rng.int(0, pool.length - 1)], frac: 1.2 }, { mode: 'cube', frac: 1 }];
+  if (d >= 5) modes.push({ mode: pool[rng.int(0, pool.length - 1)], frac: 1 });
+  const level = generateLevel({
+    id, name: meta.name, author: meta.author, difficulty: meta.difficulty,
+    lengthSec: meta.sec, modeSeq: modes, seed: id + '-v1',
+    speeds: d >= 4, mini: d >= 6,
+    bgTheme: [rng.int(0, 360), rng.int(0, 360), rng.int(0, 360)],
+    song: makeSong(id, meta.mood, meta.bpm, meta.name + ' Theme', meta.author + 'Music'),
+  });
+  level.community = true;
+  _levelCache[id] = level;
+  return level;
+}
+
 // unified fetch
 function getLevelById(id) {
   if (_levelCache[id]) return _levelCache[id];
   if (id.startsWith('main-')) return getMainLevel(parseInt(id.slice(5), 10));
   if (id.startsWith('online-')) return getOnlineLevel(id);
+  if (id.startsWith('com-')) return getCommunityLevel(id);
   if (id.startsWith('g-')) {
     const parts = id.split('-');
     return getGauntletLevel(parts[1], parseInt(parts[2], 10));
@@ -702,6 +735,7 @@ if (typeof module !== 'undefined') {
   module.exports = {
     generateLevel, solveLevel, makeSong, GenMath,
     MAIN_LEVELS, getMainLevel, ONLINE_DB, getOnlineLevel,
-    GAUNTLETS, GAUNTLET_LEVEL_NAMES, getGauntletLevel, getLevelById,
+    GAUNTLETS, GAUNTLET_LEVEL_NAMES, getGauntletLevel,
+    COMMUNITY_DB, getCommunityLevel, getLevelById,
   };
 }

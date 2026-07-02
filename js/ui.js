@@ -436,6 +436,7 @@ const UI = {
       this.toast(sess.practice ? 'Practice mode ON — auto checkpoints' : 'Back to normal mode');
       Game.restartAttempt(true);
     });
+    mkB('🎵 My Music', 'purple', () => this.levelMusicDialog(sess));
     mkB('↺ Restart', 'orange', () => { Game.togglePause(); Game.restartAttempt(true); });
     mkB('✕ Exit', 'red', () => {
       const opts = sess.opts;
@@ -452,7 +453,55 @@ const UI = {
     document.getElementById('overlay-pause').classList.remove('active');
   },
 
+  // attach your own audio file to ANY level (device-only, keyed by level id)
+  levelMusicDialog(sess) {
+    const id = sess.level.id;
+    this.dialog((panel, close) => {
+      panel.innerHTML = `<h2>🎵 MY MUSIC</h2>
+        <div class="stat-line">Play your OWN song file for "${sess.level.name}".</div>
+        <div class="stat-line" style="font-size:12px;opacity:.8">Stays on your device — never uploaded. Use songs you own.</div>`;
+      const row = document.createElement('div');
+      row.className = 'row';
+      const pick = document.createElement('button');
+      pick.className = 'gd-btn';
+      pick.textContent = '📁 Choose song file';
+      pick.onclick = () => {
+        const fi = document.createElement('input');
+        fi.type = 'file';
+        fi.accept = 'audio/*';
+        fi.onchange = () => {
+          const f = fi.files && fi.files[0];
+          if (!f) return;
+          MusicStore.set(id, f).then(() => {
+            sess.customBlob = f;
+            sess.customChecked = true;
+            AudioEngine.sfxUnlock();
+            this.toast(`🎵 "${f.name}" set — restart to hear it from the top`);
+            close();
+          }).catch(() => this.toast('Could not store that file :('));
+        };
+        fi.click();
+      };
+      row.appendChild(pick);
+      const clear = document.createElement('button');
+      clear.className = 'gd-btn gray';
+      clear.textContent = '✕ Use built-in music';
+      clear.onclick = () => {
+        MusicStore.del(id).then(() => {
+          sess.customBlob = null;
+          sess.customChecked = true;
+          AudioEngine.sfxClick();
+          this.toast('Back to the built-in soundtrack');
+          close();
+        });
+      };
+      row.appendChild(clear);
+      panel.appendChild(row);
+    });
+  },
+
   // ---------- SEARCH ----------
+  searchTab: 'online',   // 'online' | 'community'
   renderSearch() {
     const el = this.screens.search;
     el.innerHTML = '';
@@ -461,8 +510,25 @@ const UI = {
 
     const title = document.createElement('div');
     title.className = 'screen-title';
-    title.textContent = 'ONLINE LEVELS';
+    title.textContent = this.searchTab === 'community' ? '👥 COMMUNITY LEVELS' : '🔍 ONLINE LEVELS';
     el.appendChild(title);
+
+    // Online / Community tabs + Import button
+    const tabRow = document.createElement('div');
+    tabRow.className = 'icon-tabs';
+    for (const [id, label] of [['online', '🔍 Online'], ['community', '👥 Community']]) {
+      const b = document.createElement('button');
+      b.className = 'gd-btn small ' + (this.searchTab === id ? 'blue' : 'gray');
+      b.textContent = label;
+      b.onclick = () => { AudioEngine.sfxClick(); this.searchTab = id; this.renderSearch(); };
+      tabRow.appendChild(b);
+    }
+    const importBtn = document.createElement('button');
+    importBtn.className = 'gd-btn small purple';
+    importBtn.textContent = '📥 Import Code';
+    importBtn.onclick = () => this.importDialog();
+    tabRow.appendChild(importBtn);
+    el.appendChild(tabRow);
 
     const bar = document.createElement('div');
     bar.className = 'search-bar-row';
@@ -494,29 +560,115 @@ const UI = {
 
     const renderList = () => {
       list.innerHTML = '';
-      let entries = ONLINE_DB.slice();
-      // published user levels appear in search too
-      for (const pl of Save.data.published) {
-        entries.push({
-          id: pl.id, name: pl.name, author: pl.author, difficulty: pl.difficulty,
-          stars: pl.stars, downloads: pl.downloads || 0, likes: pl.likes || 0,
-          lengthSec: Math.round(pl.length / 10.386), userLevel: true,
-        });
+      let entries;
+      if (this.searchTab === 'community') {
+        // featured showcase + your published + imported — all playable immediately
+        entries = COMMUNITY_DB.map(m => ({
+          id: m.id, name: m.name, author: m.author, difficulty: m.difficulty,
+          stars: diffById(m.difficulty).stars, likes: m.likes || 0, downloads: m.likes || 0,
+          lengthSec: m.sec, badge: m.epic ? 'EPIC' : m.featured ? 'Featured' : null, community: true,
+        }));
+        for (const pl of Save.data.published) {
+          entries.push({
+            id: pl.id, name: pl.name, author: pl.author, difficulty: pl.difficulty,
+            stars: pl.stars, downloads: pl.downloads || 0, likes: pl.likes || 0,
+            lengthSec: Math.round(pl.length / 10.386), userLevel: true, badge: 'Yours',
+          });
+        }
+        for (const im of Save.data.imported) {
+          const maxX = im.objects.reduce((m, o) => Math.max(m, o.x), 10);
+          entries.push({
+            id: im.id, name: im.name, author: im.author, difficulty: im.difficulty,
+            stars: diffById(im.difficulty).stars, downloads: 0, likes: 0,
+            lengthSec: Math.round((maxX + 8) / 10.386), imported: true, badge: 'Imported',
+          });
+        }
+      } else {
+        entries = ONLINE_DB.slice();
+        for (const pl of Save.data.published) {
+          entries.push({
+            id: pl.id, name: pl.name, author: pl.author, difficulty: pl.difficulty,
+            stars: pl.stars, downloads: pl.downloads || 0, likes: pl.likes || 0,
+            lengthSec: Math.round(pl.length / 10.386), userLevel: true,
+          });
+        }
       }
       if (this.searchDiff) entries = entries.filter(e => e.difficulty === this.searchDiff);
       const q = this.searchText.trim().toLowerCase();
       if (q) entries = entries.filter(e => e.name.toLowerCase().includes(q) || e.author.toLowerCase().includes(q));
-      entries.sort((a, b) => b.downloads - a.downloads);
+      entries.sort((a, b) => (b.likes || b.downloads || 0) - (a.likes || a.downloads || 0));
       if (!entries.length) {
         const none = document.createElement('div');
         none.style.cssText = 'color:#fff;font-family:var(--font);text-align:center;margin-top:30px;';
-        none.textContent = 'No levels found :(';
+        none.textContent = this.searchTab === 'community' ? 'No community levels yet — import one!' : 'No levels found :(';
         list.appendChild(none);
         return;
       }
-      for (const e of entries) list.appendChild(this.levelRow(e));
+      const playable = this.searchTab === 'community';
+      for (const e of entries) list.appendChild(this.levelRow(e, { alwaysPlayable: playable }));
     };
     renderList();
+  },
+
+  importDialog() {
+    this.dialog((panel, close) => {
+      panel.innerHTML = `<h2>📥 IMPORT LEVEL</h2>
+        <div class="stat-line">Paste a level code a friend shared, or load a .gdlevel file.</div>`;
+      const ta = document.createElement('textarea');
+      ta.placeholder = 'Paste level code here (starts with GDLV1:)…';
+      ta.style.height = '90px';
+      panel.appendChild(ta);
+      const row = document.createElement('div');
+      row.className = 'row';
+      const doImport = (code) => {
+        try {
+          const decoded = Share.decode(code);
+          if (!decoded.objects.length) { this.toast('That level has no objects!'); return; }
+          const entry = Save.importLevel(decoded);
+          AudioEngine.sfxUnlock();
+          close();
+          this.searchTab = 'community';
+          this.searchText = '';
+          this.renderSearch();
+          this.toast(`📥 Imported "${entry.name}" by ${entry.author}!`);
+        } catch (err) {
+          AudioEngine.sfxDeny();
+          this.toast('⚠ ' + err.message);
+        }
+      };
+      const go = document.createElement('button');
+      go.className = 'gd-btn';
+      go.textContent = 'Import Code';
+      go.onclick = () => doImport(ta.value);
+      row.appendChild(go);
+      const fileBtn = document.createElement('button');
+      fileBtn.className = 'gd-btn blue';
+      fileBtn.textContent = '📁 Load File';
+      fileBtn.onclick = () => {
+        const fi = document.createElement('input');
+        fi.type = 'file';
+        fi.accept = '.gdlevel,.txt,text/plain';
+        fi.onchange = () => {
+          const f = fi.files && fi.files[0];
+          if (!f) return;
+          const r = new FileReader();
+          r.onload = () => doImport(String(r.result));
+          r.readAsText(f);
+        };
+        fi.click();
+      };
+      row.appendChild(fileBtn);
+      panel.appendChild(row);
+      setTimeout(() => ta.focus(), 50);
+    });
+  },
+
+  // turn a search entry into a fully playable level object
+  resolveLevel(e) {
+    if (e.userLevel) return Save.data.published.find(x => x.id === e.id);
+    if (e.imported) { const im = Save.data.imported.find(x => x.id === e.id); return im ? Save.docToLevel(im) : null; }
+    if (e.community) return getCommunityLevel(e.id);
+    return getOnlineLevel(e.id);
   },
 
   levelRow(e, opts = {}) {
@@ -525,16 +677,18 @@ const UI = {
     row.className = 'level-row';
     const downloaded = Save.data.downloaded.includes(e.id) || e.userLevel;
     const comp = Save.data.completions[e.id] || {};
+    const badge = e.badge ? `<span style="background:${e.badge === 'EPIC' ? '#c95cff' : e.badge === 'Featured' ? '#3fa9ff' : e.badge === 'Imported' ? '#ffb13d' : '#68e838'};color:#fff;font-size:9px;padding:1px 5px;border-radius:5px;margin-left:6px;vertical-align:middle">${e.badge}</span>` : '';
     row.innerHTML = `
       <div class="facewrap"><div style="font-size:26px">${meta.face}</div><div>${meta.name}</div><div>⭐${e.stars}</div></div>
       <div class="info">
-        <div class="name">${e.name} ${comp.done ? '✓' : ''}</div>
+        <div class="name">${e.name}${badge} ${comp.done ? '✓' : ''}</div>
         <div class="author">by ${e.author}</div>
-        <div class="meta"><span>⬇ ${fmtNum(e.downloads || 0)}</span><span>👍 ${fmtNum(e.likes || 0)}</span><span>⏱ ${e.lengthSec || '?'}s</span>${comp.best ? `<span>best ${comp.best}%</span>` : ''}</div>
+        <div class="meta"><span>👍 ${fmtNum(e.likes || 0)}</span><span>⏱ ${e.lengthSec || '?'}s</span>${comp.best ? `<span>best ${comp.best}%</span>` : ''}</div>
       </div>
       <div class="actions"></div>`;
     const actions = row.querySelector('.actions');
-    if (!downloaded && !opts.noDownload) {
+    const canPlay = downloaded || opts.alwaysPlayable;
+    if (!downloaded && !opts.noDownload && !opts.alwaysPlayable) {
       const dl = document.createElement('button');
       dl.className = 'gd-btn small blue';
       dl.textContent = '⬇ Download';
@@ -557,21 +711,74 @@ const UI = {
       pb.onclick = (ev) => {
         ev.stopPropagation();
         AudioEngine.sfxClick();
-        const level = e.userLevel ? Save.data.published.find(x => x.id === e.id) : getOnlineLevel(e.id);
+        const level = this.resolveLevel(e);
         if (level) this.playLevel(level, opts.playOpts || {});
       };
       return pb;
     };
-    if (downloaded || opts.alwaysPlayable) actions.appendChild(mkPlay());
+    if (canPlay) actions.appendChild(mkPlay());
+    if (e.imported) {
+      const del = document.createElement('button');
+      del.className = 'gd-btn small red';
+      del.textContent = '🗑';
+      del.onclick = (ev) => {
+        ev.stopPropagation();
+        Save.deleteImported(e.id);
+        this.renderSearch();
+      };
+      actions.appendChild(del);
+    }
     row.onclick = () => {
-      if (downloaded || opts.alwaysPlayable) {
-        const level = e.userLevel ? Save.data.published.find(x => x.id === e.id) : getOnlineLevel(e.id);
+      if (canPlay) {
+        const level = this.resolveLevel(e);
         if (level) { AudioEngine.sfxClick(); this.playLevel(level, opts.playOpts || {}); }
       } else {
         this.toast('Download it first!');
       }
     };
     return row;
+  },
+
+  shareDialog(doc) {
+    this.dialog((panel, close) => {
+      panel.innerHTML = `<h2>🔗 SHARE LEVEL</h2>
+        <div class="stat-line">"${doc.name}" — send this code to anyone. They paste it in Search → Import.</div>`;
+      let code;
+      try { code = Share.encode(doc); }
+      catch (e) { panel.innerHTML += '<div class="stat-line">Could not create a code for this level.</div>'; return; }
+      const ta = document.createElement('textarea');
+      ta.value = code;
+      ta.readOnly = true;
+      ta.style.height = '90px';
+      ta.onclick = () => ta.select();
+      panel.appendChild(ta);
+      const row = document.createElement('div');
+      row.className = 'row';
+      const copy = document.createElement('button');
+      copy.className = 'gd-btn';
+      copy.textContent = '📋 Copy Code';
+      copy.onclick = () => {
+        ta.select();
+        const done = () => { AudioEngine.sfxUnlock(); this.toast('Copied! Send it to a friend.'); };
+        if (navigator.clipboard) navigator.clipboard.writeText(code).then(done, () => { document.execCommand('copy'); done(); });
+        else { document.execCommand('copy'); done(); }
+      };
+      row.appendChild(copy);
+      const dl = document.createElement('button');
+      dl.className = 'gd-btn blue';
+      dl.textContent = '💾 Save .gdlevel';
+      dl.onclick = () => {
+        const blob = new Blob([code], { type: 'text/plain' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = doc.name.replace(/[^a-z0-9]+/gi, '_') + '.gdlevel';
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+        AudioEngine.sfxClick();
+      };
+      row.appendChild(dl);
+      panel.appendChild(row);
+    });
   },
 
   // ---------- MY LEVELS / SAVED ----------
@@ -631,6 +838,11 @@ const UI = {
         edit.textContent = '✏️ Edit';
         edit.onclick = (ev) => { ev.stopPropagation(); AudioEngine.sfxClick(); Editor.open(doc); };
         actions.appendChild(edit);
+        const share = document.createElement('button');
+        share.className = 'gd-btn small purple';
+        share.textContent = '🔗 Share';
+        share.onclick = (ev) => { ev.stopPropagation(); AudioEngine.sfxClick(); this.shareDialog(doc); };
+        actions.appendChild(share);
         const del = document.createElement('button');
         del.className = 'gd-btn small red';
         del.textContent = '🗑';
