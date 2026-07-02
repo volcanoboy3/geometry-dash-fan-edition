@@ -12,6 +12,47 @@ const SCALES = {
   minorPent:  [0, 3, 5, 7, 10],
 };
 
+// Local custom-song storage (IndexedDB). Users can attach their OWN audio files
+// to levels — files never leave the device and are never uploaded anywhere.
+const MusicStore = {
+  db: null,
+  open() {
+    return new Promise((res, rej) => {
+      if (this.db) return res(this.db);
+      const rq = indexedDB.open('gd-music', 1);
+      rq.onupgradeneeded = () => rq.result.createObjectStore('tracks');
+      rq.onsuccess = () => { this.db = rq.result; res(this.db); };
+      rq.onerror = () => rej(rq.error);
+    });
+  },
+  async set(id, blob) {
+    const db = await this.open();
+    return new Promise((res, rej) => {
+      const tx = db.transaction('tracks', 'readwrite');
+      tx.objectStore('tracks').put(blob, id);
+      tx.oncomplete = () => res();
+      tx.onerror = () => rej(tx.error);
+    });
+  },
+  async get(id) {
+    const db = await this.open();
+    return new Promise((res, rej) => {
+      const rq = db.transaction('tracks').objectStore('tracks').get(id);
+      rq.onsuccess = () => res(rq.result || null);
+      rq.onerror = () => rej(rq.error);
+    });
+  },
+  async del(id) {
+    const db = await this.open();
+    return new Promise((res, rej) => {
+      const tx = db.transaction('tracks', 'readwrite');
+      tx.objectStore('tracks').delete(id);
+      tx.oncomplete = () => res();
+      tx.onerror = () => rej(tx.error);
+    });
+  },
+};
+
 const AudioEngine = {
   ctx: null,
   masterGain: null, musicGain: null, sfxGain: null,
@@ -23,6 +64,7 @@ const AudioEngine = {
   musicVolume: 0.7,
   sfxVolume: 0.8,
   rngCache: {},
+  customEl: null, customUrl: null,
 
   init() {
     if (this.ctx) return;
@@ -46,7 +88,11 @@ const AudioEngine = {
 
   resume() { if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume(); },
 
-  setMusicVolume(v) { this.musicVolume = v; if (this.musicGain) this.musicGain.gain.value = v; },
+  setMusicVolume(v) {
+    this.musicVolume = v;
+    if (this.musicGain) this.musicGain.gain.value = v;
+    if (this.customEl) this.customEl.volume = v;
+  },
   setSfxVolume(v) { this.sfxVolume = v; if (this.sfxGain) this.sfxGain.gain.value = v; },
 
   midiToFreq(m) { return 440 * Math.pow(2, (m - 69) / 12); },
@@ -66,9 +112,28 @@ const AudioEngine = {
   stopMusic() {
     if (this.schedTimer) { clearInterval(this.schedTimer); this.schedTimer = null; }
     this.song = null;
+    if (this.customEl) {
+      this.customEl.pause();
+      this.customEl.src = '';
+      this.customEl = null;
+    }
+    if (this.customUrl) { URL.revokeObjectURL(this.customUrl); this.customUrl = null; }
+  },
+
+  // play a user-provided local audio file (Blob from IndexedDB)
+  playCustom(blob, offsetSec = 0) {
+    this.init(); this.resume();
+    this.stopMusic();
+    this.customUrl = URL.createObjectURL(blob);
+    const el = new Audio(this.customUrl);
+    el.volume = this.musicVolume;
+    el.currentTime = offsetSec;
+    el.play().catch(() => { /* autoplay policy — user gesture will retry */ });
+    this.customEl = el;
   },
 
   musicTime() {
+    if (this.customEl) return this.customEl.currentTime;
     if (!this.song || !this.ctx) return 0;
     return this.ctx.currentTime - this.songStart;
   },

@@ -216,15 +216,16 @@ function patStairs(ctx, robot) {
 const CUBE_PATTERNS = [
   { minD: 0, w: patSpikeRow },
   { minD: 1.5, w: patBlockHop },
-  { minD: 2, w: patPad },
-  { minD: 2.5, w: patOrbHop },
+  { minD: 1.2, w: patPad, needs: 'pads' },
+  { minD: 2.5, w: patOrbHop, needs: 'orbs' },
   { minD: 3.5, w: patWall },
   { minD: 4, w: patStairs },
 ];
 
 function genGroundSegment(ctx, endX, robot) {
   while (ctx.x < endX - 8 * ctx.scale()) {
-    const pool = CUBE_PATTERNS.filter(p => p.minD <= ctx.d);
+    const pool = CUBE_PATTERNS.filter(p =>
+      p.minD <= ctx.d && (!p.needs || !ctx.features || ctx.features[p.needs] !== false));
     ctx.rng.pick(pool).w(ctx, robot);
     const rest = Math.max(1.2, 4.4 - 0.34 * ctx.d) + ctx.rng.range(0, 1.6);
     ctx.x += rest * ctx.scale();
@@ -306,6 +307,7 @@ function genFlySegment(ctx, endX, mode) {
 function generateLevel(cfg) {
   const d = DIFF_GEN[cfg.difficulty] != null ? DIFF_GEN[cfg.difficulty] : 3;
   const ctx = makeCtx(cfg.seed, d);
+  ctx.features = cfg.features || null;   // e.g. {pads:false, orbs:false} for early levels
   const lengthSec = cfg.lengthSec || 60;
   const totalBlocks = SPEEDS[1] * lengthSec; // approx; speed portals stretch play time
   const modeSeq = cfg.modeSeq && cfg.modeSeq.length ? cfg.modeSeq : [{ mode: 'cube', frac: 1 }];
@@ -510,8 +512,8 @@ function makeSong(seed, mood, bpm, name, artist) {
 // lengths and mode sequences follow the real metadata (per wiki research); the
 // layouts and music are original. Speed portals first appear in Electrodynamix (15).
 const MAIN_LEVELS = [
-  { n: 1,  name: 'Stereo Madness',        difficulty: 'easy',    stars: 1,  sec: 89,  mood: 'upbeat',  bpm: 126, modes: [['cube', 2.6], ['ship', 1.5], ['cube', 3.4], ['ship', 1.3]] },
-  { n: 2,  name: 'Back On Track',         difficulty: 'easy',    stars: 2,  sec: 84,  mood: 'house',   bpm: 128, modes: [['cube', 4.4], ['ship', 1.5], ['cube', 3.1]] },
+  { n: 1,  name: 'Stereo Madness',        difficulty: 'easy',    stars: 1,  sec: 89,  mood: 'upbeat',  bpm: 126, modes: [['cube', 2.6], ['ship', 1.5], ['cube', 3.4], ['ship', 1.3]], features: { pads: false, orbs: false } },
+  { n: 2,  name: 'Back On Track',         difficulty: 'easy',    stars: 2,  sec: 84,  mood: 'house',   bpm: 128, modes: [['cube', 4.4], ['ship', 1.5], ['cube', 3.1]], features: { orbs: false } },
   { n: 3,  name: 'Polargeist',            difficulty: 'normal',  stars: 3,  sec: 93,  mood: 'upbeat',  bpm: 130, modes: [['cube', 4], ['ship', 1.6], ['cube', 3.4]] },
   { n: 4,  name: 'Dry Out',               difficulty: 'normal',  stars: 4,  sec: 84,  mood: 'house',   bpm: 130, modes: [['cube', 3], ['cube', 1.5], ['ship', 1.5], ['cube', 1.5]] },
   { n: 5,  name: 'Base After Base',       difficulty: 'hard',    stars: 5,  sec: 86,  mood: 'funky',   bpm: 132, modes: [['cube', 4.5], ['ship', 1.5], ['cube', 1.4], ['cube', 1.3]] },
@@ -557,6 +559,7 @@ function getMainLevel(n) {
     seed: 'main-' + n + '-v1',
     speeds: !!cfg.speeds,
     mini: !!cfg.mini,
+    features: cfg.features,
     bgTheme: MAIN_BG_THEMES[n % MAIN_BG_THEMES.length],
     song: makeSong('main-' + n, cfg.mood, cfg.bpm, cfg.name + ' (tribute mix)', 'SynthBot'),
   });

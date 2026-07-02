@@ -200,7 +200,7 @@ const Game = {
     window.addEventListener('keyup', sess.onUp);
 
     this.paused = false;
-    if (level.song) AudioEngine.playSong(level.song);
+    this.startMusic(sess, 0);
     UI.showHUD(true, sess);
     sess.raf = requestAnimationFrame((t) => this.loop(t));
     // rAF stops in hidden tabs — keep simulating so the run stays consistent
@@ -236,10 +236,22 @@ const Game = {
       UI.hidePause();
       const sess = this.session;
       sess.lastT = performance.now();
-      if (sess.level.song && !sess.run.player.dead) {
-        AudioEngine.playSong(sess.level.song, sess.run.time);
-      }
+      if (!sess.run.player.dead) this.startMusic(sess, sess.run.time);
     }
+  },
+
+  // plays the user's own local audio file for this level if one is attached,
+  // otherwise the built-in synth song
+  startMusic(sess, offset) {
+    const go = () => {
+      if (this.session !== sess || this.paused) return;
+      if (sess.customBlob) AudioEngine.playCustom(sess.customBlob, offset);
+      else if (sess.level.song) AudioEngine.playSong(sess.level.song, offset);
+    };
+    if (sess.customChecked) { go(); return; }
+    MusicStore.get(sess.level.id)
+      .then(b => { sess.customBlob = b; sess.customChecked = true; go(); })
+      .catch(() => { sess.customChecked = true; go(); });
   },
 
   restartAttempt(full) {
@@ -252,7 +264,7 @@ const Game = {
       sess.run = createRun(sess.level);
       sess.checkpoints = [];
       sess.lastCpTime = 0;
-      if (sess.level.song) AudioEngine.playSong(sess.level.song);
+      this.startMusic(sess, 0);
     }
     sess.input.held = false;
     sess.input.pressT = -1;

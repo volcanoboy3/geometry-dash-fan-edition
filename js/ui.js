@@ -289,6 +289,49 @@ const UI = {
     wrap.appendChild(mkArrow(1));
     el.appendChild(wrap);
 
+    // attach your OWN audio file to this level (stays on this device only)
+    const musicRow = document.createElement('div');
+    musicRow.style.cssText = 'display:flex;gap:8px;margin-top:10px;align-items:center';
+    const musicBtn = document.createElement('button');
+    musicBtn.className = 'gd-btn small purple';
+    musicBtn.textContent = '🎵 Use my own song file';
+    musicBtn.onclick = (ev) => {
+      ev.stopPropagation();
+      const inp = document.createElement('input');
+      inp.type = 'file';
+      inp.accept = 'audio/*';
+      inp.onchange = () => {
+        const f = inp.files && inp.files[0];
+        if (!f) return;
+        MusicStore.set('main-' + cfg.n, f).then(() => {
+          AudioEngine.sfxUnlock();
+          this.toast(`🎵 "${f.name}" set for ${cfg.name} — plays from your device only`);
+          this.renderMainLevels();
+        }).catch(() => this.toast('Could not store that file :('));
+      };
+      inp.click();
+    };
+    musicRow.appendChild(musicBtn);
+    const clearBtn = document.createElement('button');
+    clearBtn.className = 'gd-btn small gray hidden';
+    clearBtn.textContent = '✕ back to built-in music';
+    clearBtn.onclick = (ev) => {
+      ev.stopPropagation();
+      MusicStore.del('main-' + cfg.n).then(() => {
+        AudioEngine.sfxClick();
+        this.toast('Back to the built-in soundtrack');
+        this.renderMainLevels();
+      });
+    };
+    musicRow.appendChild(clearBtn);
+    el.appendChild(musicRow);
+    MusicStore.get('main-' + cfg.n).then(b => {
+      if (b) {
+        musicBtn.textContent = '🎵 Your song is ON for this level';
+        clearBtn.classList.remove('hidden');
+      }
+    }).catch(() => {});
+
     const dots = document.createElement('div');
     dots.className = 'page-dots';
     for (let i = 0; i < n; i++) {
